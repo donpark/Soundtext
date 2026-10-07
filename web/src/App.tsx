@@ -19,6 +19,22 @@ const SOUND_RENOTIFY_MS = 12000;
 // floor is adaptive: it tracks ambient level so a noisy room doesn't spam.
 const SILENCE_RMS = 0.005;
 const SIGNAL_OVER_NOISE = 3;
+// The speech channel owns speech. The sound classifier detects it too, and
+// fires first: `[Speech]` arrives a second or two before the transcript and
+// says less. Drop those labels, but only while the speech channel is healthy.
+// If Whisper is unavailable, `[Speech]` is the only signal there is.
+// Labels that Whisper cannot transcribe at all stay in: `[Whispering]`,
+// `[Chatter]` and `[Hubbub, speech noise, speech babble]` carry news the
+// transcript will never carry.
+const SPEECH_LABELS = new Set([
+  "Speech",
+  "Male speech, man speaking",
+  "Female speech, woman speaking",
+  "Child speech, kid speaking",
+  "Conversation",
+  "Narration, monologue",
+  "Speech synthesizer",
+]);
 const MAX_TICKER_ITEMS = 40;
 const SOURCE_URL = "https://github.com/donpark/Soundtext";
 
@@ -40,10 +56,15 @@ export default function App() {
   const nextId = useRef(0);
   const lastSound = useRef({ label: "", at: 0 });
   const noiseFloor = useRef(0.004);
+  // Read inside onWindow, which is the first render's closure — refs, not state.
+  const speechListening = useRef(false);
 
   const enqueue = useCallback((kind: TickerItem["kind"], text: string) => {
     const id = nextId.current++;
-    setItems((prev) => [...prev, { id, kind, text }].slice(-MAX_TICKER_ITEMS));
+    // Sound labels are model output ("Clapping") and always lower-case in the
+    // display. Transcripts keep their own casing: they are quotes.
+    const shown = kind === "sound" ? text.toLowerCase() : text;
+    setItems((prev) => [...prev, { id, kind, text: shown }].slice(-MAX_TICKER_ITEMS));
   }, []);
 
   const removeItem = useCallback((id: number) => {
@@ -69,28 +90,45 @@ export default function App() {
   }
 
   async function start() {
-    if (!(await ensureModel())) return;
+    if (!navigator.gpu) {
+      setError(
+        "This demo classifies sound on the GPU. Use Chrome or Edge on a desktop, or Safari 18 and later.",
+      );
+      setStatus("error");
+      return;
+    }
+    // Start the download first, so its progress is reported. Then take the
+    // microphone in the same gesture: iOS grants the mic only while the tap
+    // that asked for it is fresh, and the download can take minutes.
+    const model = ensureModel();
     try {
       await capture.current.start(onWindow);
-      setStatus("listening");
-      // Speech is a second pipeline running in parallel. Its model downloads in
-      // the background so it never delays the sound-event path.
-      void startSpeech(
-        (e) => enqueue("speech", e.text),
-        setSpeechStatus,
-      ).catch((err) =>
-        console.error("[soundtext] speech pipeline failed", err),
-      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[soundtext] microphone failed", e);
       setError(msg);
       setStatus("error");
+      return;
     }
+    if (!(await model)) {
+      await capture.current.stop();
+      return;
+    }
+    setStatus("listening");
+    // Speech is a second pipeline running in parallel. Its model downloads in
+    // the background so it never delays the sound-event path.
+    void startSpeech(
+      (e) => enqueue("speech", e.text),
+      (s) => {
+        speechListening.current = s === "listening";
+        setSpeechStatus(s);
+      },
+    ).catch((err) => console.error("[soundtext] speech pipeline failed", err));
   }
 
   async function stop() {
     await capture.current.stop();
+    speechListening.current = false;
     await stopSpeech(setSpeechStatus);
     setStatus("idle");
   }
@@ -124,6 +162,7 @@ export default function App() {
         if (!top) return;
         setLastLabel(top.label);
         if (top.score < MIN_SOUND_SCORE) return;
+        if (speechListening.current && SPEECH_LABELS.has(top.label)) return;
         const now = Date.now();
         const changed = top.label !== lastSound.current.label;
         const stale = now - lastSound.current.at >= SOUND_RENOTIFY_MS;
@@ -144,54 +183,58 @@ export default function App() {
   const active = status === "listening";
 
   return (
-    <main className="min-h-screen px-5 py-10 sm:px-8 sm:py-16">
+    <main className="min-h-dvh px-4 py-8 sm:px-8 sm:py-16">
       <div className="mx-auto w-full max-w-5xl">
         <header className="flex flex-wrap items-end justify-between gap-x-10 gap-y-3">
           <div>
             <h1 className="wordmark text-2xl sm:text-[28px]">SOUNDTEXT</h1>
             <p className="mt-2 max-w-md text-sm text-ink-2">
-              What is happening around you, written on one line.
+              What is happening around you, written as it is heard.
             </p>
           </div>
           <p className="label">on-device · nothing recorded</p>
         </header>
 
-        <section className="mt-10" aria-label="live line">
-          <div className="flex items-center justify-between gap-4 bg-panel px-4 py-2.5">
+        <section className="mt-10 border-y border-rule" aria-label="live line">
+          <div className="flex items-center justify-between gap-4 border-b border-rule bg-panel px-3 py-2.5 sm:px-4">
             <span className="flex items-center gap-2.5">
               <span
                 className={`tally-dot h-2 w-2 rounded-full ${TALLY[status].dot} ${
                   active ? "tally-live" : ""
                 }`}
               />
-              <span className="label !text-ink-2">{TALLY[status].text}</span>
+              <span className="label !text-ink-2" data-app-status={status}>
+                {TALLY[status].text}
+              </span>
             </span>
             <span className="label hidden sm:block">
-              microphone → sound classifier + whisper → line
+              microphone → sound classifier + whisper → two lines
             </span>
           </div>
 
-          <Ticker items={items} onExit={removeItem} />
+          {(["sound", "speech"] as const).map((kind) => (
+            <Ticker
+              key={kind}
+              kind={kind}
+              items={items.filter((it) => it.kind === kind)}
+              onExit={removeItem}
+            />
+          ))}
 
-          <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 bg-panel px-4 py-2.5">
-            <span className="flex items-center gap-5">
-              <Channel swatch="bg-event" name="sound" example="[knock]" />
-              <Channel swatch="bg-voice" name="speech" example="“sorry”" />
-              <span data-sound-label={lastLabel} className="sr-only" />
-            </span>
-            <span className="flex items-center gap-4">
-              <span className="label">speech:&nbsp;
-                <span
-                  data-speech-status={speechStatus}
-                  className={
-                    speechStatus === "error" ? "text-fault" : "text-ink-2"
-                  }
-                >
-                  {SPEECH_LABEL[speechStatus]}
-                </span>
+          <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2 bg-panel px-3 py-2.5 sm:px-4">
+            <span data-sound-label={lastLabel} className="sr-only" />
+            <span className="label">
+              speech:&nbsp;
+              <span
+                data-speech-status={speechStatus}
+                className={
+                  speechStatus === "error" ? "text-fault" : "text-ink-2"
+                }
+              >
+                {SPEECH_LABEL[speechStatus]}
               </span>
-              <Meter peak={meter.peak} gate={meter.gate} active={active} />
             </span>
+            <Meter peak={meter.peak} gate={meter.gate} active={active} />
           </div>
         </section>
 
@@ -213,7 +256,7 @@ export default function App() {
                   : "Start listening"}
             </button>
             <p className="text-xs text-ink-3">
-              Chrome or Edge on desktop — WebGPU is required.
+              Needs WebGPU: Chrome or Edge on desktop, or Safari 18 and later.
             </p>
           </div>
 
@@ -232,16 +275,19 @@ export default function App() {
           <div className="prose-panel">
             <h2 className="label">what it does</h2>
             <p className="mt-3">
-              SoundText listens through your microphone and writes what it hears
-              to one line. A sound event appears as <code>[knock]</code>, speech
-              as <code>“what time is it”</code>. The line runs right to left and
-              keeps only the last few things heard.
+              SoundText listens through your microphone and writes what it
+              hears. Sound events scroll along the upper line as{" "}
+              <code>[knock]</code>. Speech scrolls along the lower line as{" "}
+              <code>“what time is it”</code>. Both lines run right to left and
+              keep only the last few things heard.
             </p>
             <p className="mt-3">
-              Two models run at once, deliberately apart: an AudioSet classifier
-              for sound events (527 everyday classes) and Whisper for speech,
-              gated by a voice-activity detector. Keeping them separate means
-              recognizing a sentence can never delay a sound like a smoke alarm.
+              The lines stay separate because the pipelines behind them are
+              separate. An AudioSet classifier places sound events from 527
+              everyday classes on the upper line. Whisper, gated by a
+              voice-activity detector, places speech on the lower one. A slow
+              transcript can therefore never hold up a sound like a smoke
+              alarm.
             </p>
             <p className="mt-3">
               All of it runs in this browser tab. Audio is never uploaded, and
@@ -260,11 +306,12 @@ export default function App() {
                 The first run downloads the models — progress shows above the
                 button. Later runs start immediately from the browser cache.
               </Step>
-              <Step n={3} title="Read the line">
-                Clap, knock, or say something out loud. Sounds show as{" "}
-                <code>[clap]</code>, speech as <code>“sorry”</code>. Leave the
-                tab open to keep it running; <em>Stop listening</em> ends the
-                session and releases the microphone.
+              <Step n={3} title="Read the lines">
+                Clap, knock, or say something out loud. <code>[clap]</code>{" "}
+                appears on the sound line, <code>“sorry”</code> on the speech
+                line. Leave the tab open to keep it running.{" "}
+                <em>Stop listening</em> ends the session and releases the
+                microphone.
               </Step>
             </ol>
           </div>
@@ -329,24 +376,6 @@ const SPEECH_LABEL: Record<SpeechStatus, string> = {
   listening: "listening",
   error: "unavailable",
 };
-
-function Channel({
-  swatch,
-  name,
-  example,
-}: {
-  swatch: string;
-  name: string;
-  example: string;
-}) {
-  return (
-    <span className="flex items-center gap-2">
-      <span className={`h-2 w-2 rounded-[1px] ${swatch}`} />
-      <span className="label !text-ink-2">{name}</span>
-      <span className="font-mono text-xs text-ink-3">{example}</span>
-    </span>
-  );
-}
 
 // 0.001 → 0%, 0.2 → 100%. Logarithmic, because that is how loudness reads.
 function meterPct(v: number): number {
@@ -487,7 +516,10 @@ function ModelPanel({
 
   if (status === "error") {
     return (
-      <div className="mt-6 border border-fault/50 bg-fault/10 px-4 py-3.5">
+      <div
+        data-app-error={error}
+        className="mt-6 border border-fault/50 bg-fault/10 px-4 py-3.5"
+      >
         <div className="label !text-fault">
           {ready ? "microphone failed" : "model failed to load"}
         </div>

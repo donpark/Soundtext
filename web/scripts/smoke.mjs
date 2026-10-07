@@ -119,15 +119,29 @@ async function run() {
     }, !!process.env.SMOKE_COLD_LABELS);
     if (!clicked) throw new Error("Start listening button not found");
 
+    // Read app state from its hooks, never from page text: the demo copy
+    // contains the same words the assertions look for.
     await page.waitForFunction(
-      () => /model ready|failed to load|Microphone failed/.test(document.body.innerText),
-      { timeout: TIMEOUT_MS, polling: 2000 },
+      () => {
+        const s = document
+          .querySelector("[data-app-status]")
+          ?.getAttribute("data-app-status");
+        return s === "listening" || s === "error";
+      },
+      { timeout: TIMEOUT_MS, polling: 1000 },
     );
-    const body = await page.evaluate(() => document.body.innerText);
-    if (/failed to load|Microphone failed/.test(body)) {
-      const line = body.split("\n").find((l) => /failed/i.test(l)) ?? "";
-      throw new Error(`app reported an error: ${line.trim()}`);
-    }
+    const failure = await page.evaluate(() => {
+      const status = document
+        .querySelector("[data-app-status]")
+        ?.getAttribute("data-app-status");
+      if (status !== "error") return "";
+      return (
+        document
+          .querySelector("[data-app-error]")
+          ?.getAttribute("data-app-error") ?? "no message"
+      );
+    });
+    if (failure) throw new Error(`app reported an error: ${failure}`);
 
     await page.waitForFunction(
       () => document.querySelector("[data-sound-label]")?.getAttribute("data-sound-label"),
@@ -141,13 +155,20 @@ async function run() {
     );
     console.log(`sound classification: ${label}`);
 
-    // A sound must actually reach the ticker, not just be classified.
+    // A sound must actually reach the ticker, not just be classified. Read the
+    // token from its hook: "[clap]" also appears in the page's own copy.
     await page.waitForFunction(
-      () => /\[(clap|applause)[^\]]*\]/i.test(document.body.innerText),
+      () =>
+        [...document.querySelectorAll('[data-ticker-kind="sound"]')].some((el) =>
+          /^\[(clap|applause)/i.test(el.getAttribute("data-ticker-item") ?? ""),
+        ),
       { timeout: 60000, polling: 500 },
     );
     const token = await page.evaluate(
-      () => document.body.innerText.match(/\[[^\]]+\]/)?.[0] ?? "",
+      () =>
+        [...document.querySelectorAll('[data-ticker-kind="sound"]')]
+          .map((el) => el.getAttribute("data-ticker-item"))
+          .pop() ?? "",
     );
     console.log(`ticker sound token: ${token}`);
 

@@ -96,20 +96,40 @@ try {
     );
     console.log("VAD listening; waiting for a transcript…");
 
+    // Read the ticker tokens, never the page text: the demo copy contains
+    // "...when the browser asks", which matches /ask/ and made this check pass
+    // without a transcript.
+    const tokens = () =>
+      page.$$eval("[data-ticker-item]", (els) =>
+        els.map((el) => ({
+          kind: el.getAttribute("data-ticker-kind"),
+          text: el.getAttribute("data-ticker-item"),
+        })),
+      );
     await page.waitForFunction(
-      () => /fellow|america|country|ask/i.test(document.body.innerText),
+      () =>
+        [...document.querySelectorAll('[data-ticker-kind="speech"]')].some((el) =>
+          /fellow|america|country/i.test(el.getAttribute("data-ticker-item")),
+        ),
       { timeout: 120000, polling: 1000 },
     );
-    // The ticker shows the transcript as “...”; grab the line it landed on.
-    const line = await page.evaluate(() => {
-      const m = document.body.innerText.match(
-        /[^\n]*(fellow|america|country|ask)[^\n]*/i,
-      );
-      return m ? m[0] : "";
-    });
-    console.log(`ticker shows: "${line.trim()}"`);
-    if (!line.trim()) {
+    const seen = await tokens();
+    const speech = seen.filter((t) => t.kind === "speech");
+    const sounds = seen.filter((t) => t.kind === "sound");
+    console.log(`ticker speech: ${speech.map((t) => t.text).join(" ")}`);
+    console.log(`ticker sounds: ${sounds.map((t) => t.text).join(" ")}`);
+    if (!speech.some((t) => /fellow|america|country/i.test(t.text))) {
       throw new Error("transcript did not appear in the ticker");
+    }
+    // The speech channel owns speech. A [Speech] token from the sound
+    // classifier is the same news, earlier and vaguer.
+    const vague = sounds.filter((t) =>
+      /^\[(speech|conversation|narration)(,|])/i.test(t.text),
+    );
+    if (vague.length) {
+      throw new Error(
+        `sound channel announced speech the speech channel owns: ${vague.map((t) => t.text).join(" ")}`,
+      );
     }
     console.log("SPEECH E2E OK");
   } finally {

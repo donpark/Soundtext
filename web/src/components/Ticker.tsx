@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 
+export type TickerKind = "sound" | "speech";
+
 export type TickerItem = {
   id: number;
-  kind: "sound" | "speech";
+  kind: TickerKind;
   text: string;
 };
 
@@ -12,23 +14,33 @@ const GAP = 28;
 // Faster than the 18px-era 70px/s so the larger tokens pass at the same rate.
 const SPEED = 90;
 
-// Single-line rendering of the tail of the queue, e.g. `[clap]…"sorry"…`.
-// This is the form a Meta glasses layout would send: the display gets whole
-// snapshots (no partial updates), so the browser's pixel scroll is approximated
-// by re-sending this window whenever a token is added or expires.
-export function tickerText(items: TickerItem[], max = 8): string {
-  return items
-    .slice(-max)
-    .map((it) => (it.kind === "sound" ? `[${it.text}]` : `“${it.text}”`))
-    .join("…");
+// How one item renders: sounds are bracketed, speech is in quotes.
+export function tickerToken(it: TickerItem): string {
+  return it.kind === "sound" ? `[${it.text}]` : `“${it.text}”`;
 }
 
-// Band is deliberately shorter than it is loud: the line is the display, the
-// strip around it is the frame.
+// Single-line rendering of the tail of a lane, e.g. `[clap]…[crash]…`. This is
+// the form a Meta glasses layout would send: the display gets whole snapshots
+// (no partial updates), so the browser's pixel scroll is approximated by
+// re-sending this window whenever a token is added or expires.
+export function tickerText(items: TickerItem[], max = 8): string {
+  return items.slice(-max).map(tickerToken).join("…");
+}
+
+const LANE: Record<TickerKind, { name: string; swatch: string }> = {
+  sound: { name: "sound", swatch: "bg-event" },
+  speech: { name: "speech", swatch: "bg-voice" },
+};
+
+// One lane of the display. Sound events and speech scroll independently: they
+// are separate pipelines with different latencies, so sharing a line would let
+// a slow transcript hold up a safety-relevant sound.
 export function Ticker({
+  kind,
   items,
   onExit,
 }: {
+  kind: TickerKind;
   items: TickerItem[];
   onExit: (id: number) => void;
 }) {
@@ -85,39 +97,53 @@ export function Ticker({
   }, []);
 
   const latest = items.at(-1);
+  const lane = LANE[kind];
 
   return (
     <div
-      ref={viewport}
-      className="relative h-24 w-full overflow-hidden border-y border-rule bg-panel-2/50"
+      data-lane={kind}
+      className="flex items-stretch border-b border-rule last:border-b-0"
     >
-      {items.length === 0 && (
-        <div className="label absolute inset-0 flex items-center justify-center">
-          nothing heard yet
-        </div>
-      )}
-      {items.map((it) => (
-        <span
-          key={it.id}
-          ref={register(it.id)}
-          style={{ transform: "translateX(100vw)" }}
-          className={`absolute inset-y-0 flex items-center whitespace-nowrap font-mono text-2xl sm:text-[34px] ${
-            it.kind === "sound" ? "text-event" : "text-voice"
-          }`}
-        >
-          {it.kind === "sound" ? `[${it.text}]` : `“${it.text}”`}
-          <span className="ml-2 text-ink-3">…</span>
-        </span>
-      ))}
-      {/* Announced one token at a time: the visual line is an endless scroll,
-          which is noise to a screen reader. */}
-      <p aria-live="polite" className="sr-only">
-        {latest
-          ? latest.kind === "sound"
-            ? `sound: ${latest.text}`
-            : `speech: ${latest.text}`
-          : ""}
-      </p>
+      <div className="flex w-20 shrink-0 items-center gap-2 border-r border-rule px-3 sm:w-28 sm:px-4">
+        <span className={`h-2 w-2 rounded-[1px] ${lane.swatch}`} />
+        <span className="label !text-ink-2">{lane.name}</span>
+      </div>
+
+      <div
+        ref={viewport}
+        className="relative h-14 min-w-0 flex-1 overflow-hidden bg-panel-2/50 sm:h-[72px]"
+      >
+        {items.length === 0 && (
+          <span className="label absolute inset-y-0 left-4 flex items-center">
+            —
+          </span>
+        )}
+        {items.map((it) => (
+          <span
+            key={it.id}
+            ref={register(it.id)}
+            // Test hooks: a check reads the line from here, never from page text.
+            data-ticker-kind={it.kind}
+            data-ticker-item={tickerToken(it)}
+            style={{ transform: "translateX(100vw)" }}
+            className={`absolute inset-y-0 flex items-center whitespace-nowrap font-mono text-xl sm:text-[28px] ${
+              it.kind === "sound" ? "text-event" : "text-voice"
+            }`}
+          >
+            {tickerToken(it)}
+            <span className="ml-2 text-ink-3">…</span>
+          </span>
+        ))}
+        {/* Announced one token at a time: the visual line is an endless scroll,
+            which is noise to a screen reader. */}
+        <p aria-live="polite" className="sr-only">
+          {latest
+            ? latest.kind === "sound"
+              ? `sound: ${latest.text}`
+              : `speech: ${latest.text}`
+            : ""}
+        </p>
+      </div>
     </div>
   );
 }
