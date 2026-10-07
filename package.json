@@ -1,0 +1,7 @@
+{
+  "name": "soundtext",
+  "private": true,
+  "scripts": {
+    "web": "pnpm --filter @soundtext/web"
+  }
+}
