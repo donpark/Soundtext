@@ -1,1 +1,125 @@
 @import "tailwindcss";
+
+/* Self-hosted so the demo page makes no third-party requests — the whole point
+   is that this app only listens locally, and a font CDN would leak a load to
+   someone else. Latin subsets; the fallback stacks below cover the rest. */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 400 700;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url("./assets/fonts/archivo-var-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-400-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/plex-mono-500-latin.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Rack-panel palette. The page sits deeper than the panel it holds. */
+  --color-page: #080b0e;
+  --color-panel: #0d1216;
+  --color-panel-2: #131b21;
+  --color-rule: #1e2a32;
+  --color-rule-2: #2b3a44;
+  /* Warm off-white: caption ink, not screen white. */
+  --color-ink: #e8e3d8;
+  --color-ink-2: #9ca7ad;
+  /* Light enough to clear 4.5:1 on the panel at label size. */
+  --color-ink-3: #7e8b94;
+  /* The two channels. Amber is the human voice, mint is the machine's ear. */
+  --color-voice: #f2a63b;
+  --color-event: #63d6b6;
+  --color-fault: #e4574c;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-event);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Annunciator label: small, expanded, uppercase. Used for panel hardware
+     text — never for prose. */
+  .label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.2;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+
+  .wordmark {
+    font-weight: 600;
+    font-stretch: 125%;
+    letter-spacing: 0.16em;
+  }
+
+  .tally-dot {
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+  }
+  .tally-live {
+    animation: tally 2.4s ease-in-out infinite;
+  }
+  @keyframes tally {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  .prose-panel p {
+    color: var(--color-ink-2);
+    font-size: 0.875rem;
+    line-height: 1.65;
+  }
+  .prose-panel code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-ink);
+    background: var(--color-panel-2);
+    border: 1px solid var(--color-rule);
+    border-radius: 3px;
+    padding: 0 0.3em;
+  }
+}
+
+/* The scrolling line is the function, so it keeps moving; everything else
+   stops. */
+@media (prefers-reduced-motion: reduce) {
+  .tally-live {
+    animation: none;
+  }
+  .meter-fill {
+    transition: none;
+  }
+}

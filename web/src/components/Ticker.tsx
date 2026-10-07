@@ -9,7 +9,8 @@ export type TickerItem = {
 // Gap between tokens (the "..." in [clap]...[crash]."sorry"), and how fast the
 // line moves. Constant speed, so tokens enter from the right and exit left.
 const GAP = 28;
-const SPEED = 70;
+// Faster than the 18px-era 70px/s so the larger tokens pass at the same rate.
+const SPEED = 90;
 
 // Single-line rendering of the tail of the queue, e.g. `[clap]…"sorry"…`.
 // This is the form a Meta glasses layout would send: the display gets whole
@@ -22,6 +23,8 @@ export function tickerText(items: TickerItem[], max = 8): string {
     .join("…");
 }
 
+// Band is deliberately shorter than it is loud: the line is the display, the
+// strip around it is the frame.
 export function Ticker({
   items,
   onExit,
@@ -81,14 +84,16 @@ export function Ticker({
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  const latest = items.at(-1);
+
   return (
     <div
       ref={viewport}
-      className="relative h-20 w-full overflow-hidden border-y border-neutral-800 bg-neutral-900/40"
+      className="relative h-24 w-full overflow-hidden border-y border-rule bg-panel-2/50"
     >
       {items.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-700">
-          waiting for sound or speech…
+        <div className="label absolute inset-0 flex items-center justify-center">
+          nothing heard yet
         </div>
       )}
       {items.map((it) => (
@@ -96,14 +101,23 @@ export function Ticker({
           key={it.id}
           ref={register(it.id)}
           style={{ transform: "translateX(100vw)" }}
-          className={`absolute inset-y-0 flex items-center whitespace-nowrap text-lg font-medium ${
-            it.kind === "sound" ? "text-emerald-400" : "text-sky-300"
+          className={`absolute inset-y-0 flex items-center whitespace-nowrap font-mono text-2xl sm:text-[34px] ${
+            it.kind === "sound" ? "text-event" : "text-voice"
           }`}
         >
           {it.kind === "sound" ? `[${it.text}]` : `“${it.text}”`}
-          <span className="ml-1 text-neutral-700">…</span>
+          <span className="ml-2 text-ink-3">…</span>
         </span>
       ))}
+      {/* Announced one token at a time: the visual line is an endless scroll,
+          which is noise to a screen reader. */}
+      <p aria-live="polite" className="sr-only">
+        {latest
+          ? latest.kind === "sound"
+            ? `sound: ${latest.text}`
+            : `speech: ${latest.text}`
+          : ""}
+      </p>
     </div>
   );
 }
