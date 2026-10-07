@@ -1,7 +1,7 @@
 # SoundText
 
 PoC: a single-page webapp that listens to the microphone and shows a stream of
-what it hears — sound events and nearby speech — as one ticker.
+what it hears as two scrolling lines: sound events above, nearby speech below.
 
 - **Stack:** Vite + React + TypeScript + Tailwind CSS (v4), no backend
 - **Sound events:** [AST](https://huggingface.co/onnx-community/ast-finetuned-audioset-10-10-0.4593-ONNX) — an AudioSet-trained classifier (527 classes) via transformers.js on WebGPU
@@ -43,6 +43,12 @@ which is what makes `navigator.gpu` available (it is `undefined` on
 4. A label reaches the ticker only if it clears `MIN_SOUND_SCORE` (0.2) and
    differs from the last one shown (`SOUND_COOLDOWN_MS` bounds the rate; the
    same label re-announces after `SOUND_RENOTIFY_MS`).
+5. Labels in `SPEECH_LABELS` (`Speech`, `Conversation`, and similar) are
+   dropped while the speech channel is listening. AST fires first with the
+   vaguer token, and the transcript says the same thing better. If Whisper is
+   unavailable, `[Speech]` is the only signal left, so it is kept.
+   `Whispering`, `Chatter` and `Hubbub, speech noise, speech babble` are never
+   dropped — Whisper cannot transcribe those, so they stay as sound events.
 
 **Speech path** (`src/lib/speech.ts`)
 
@@ -55,11 +61,14 @@ weights in a bundler-usable location.
 
 **Display** (`src/components/Ticker.tsx`)
 
-One line, moving right→left: sounds as `[clap]`, speech as `“sorry”`. Tokens
-queue behind whatever is still on screen, so a burst of detections streams in
-one at a time rather than dumping. `tickerText(queue)` renders the same queue as
-a single line for a Meta glasses layout (DAT has no partial updates, so the
-glasses get whole snapshots re-sent on change, not a pixel scroll).
+Two lanes, moving right→left: `[clap]` on the sound lane, `“sorry”` on the
+speech lane. Each lane owns its rAF loop and its token positions, so a slow
+transcript cannot hold up a sound. Tokens queue behind whatever is still on
+screen in that lane, so a burst of detections streams in one at a time rather
+than dumping. Sound labels are lower-cased in the queue; transcripts are not.
+`tickerText(queue)` renders a lane as a single line for a Meta glasses layout
+(DAT has no partial updates, so the glasses get whole snapshots re-sent on
+change, not a pixel scroll).
 
 ## Why not EmbeddingGemma zero-shot
 

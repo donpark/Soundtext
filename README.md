@@ -1,10 +1,10 @@
 # SoundText
 
-![The SoundText demo page. The wordmark, a live line that reads [Clapping], and the two channel keys for sound and speech.](docs/cover.png)
+![The SoundText demo page: the wordmark, two labelled lanes scrolling [clapping] and a transcript, and the live status row.](docs/cover.png)
 
 SoundText is an ambient-awareness proof of concept. A device listens to its
-surroundings. It shows what it hears on one line: sound events and nearby
-speech.
+surroundings. It shows what it hears on two moving lines: sound events on the
+upper line, speech on the lower one.
 
 Motivating use case: a person wears earphones, and optionally Meta Ray-Ban
 Display glasses. The person cannot hear the surroundings, but wants to know
@@ -23,18 +23,20 @@ soundtext/
 
 ## What it does
 
-Two independent pipelines in the browser feed one ticker. The ticker is a
-single line of text. The pipelines stay separate on purpose. Speech recognition
-must never delay sound detection.
+Two independent pipelines in the browser feed the two lanes. The upper lane
+carries sound events. The lower lane carries speech. The pipelines stay
+separate on purpose: speech recognition must never delay sound detection.
 
 | Pipeline | Model | Runtime |
 |---|---|---|
 | **Sound events** | AST, an AudioSet classifier with 527 classes | transformers.js / ONNX on WebGPU |
 | **Speech** | Whisper-base, gated by Silero VAD | transformers.js + `@ricky0123/vad-web` |
 
-A sound event shows as `[clap]`. Speech shows as `“sorry”`. The ticker moves
-from right to left. `tickerText(queue)` is the single-line form for a Meta
-glasses layout. The glasses cannot animate, so they receive whole snapshots.
+A sound event shows as `[clap]`, always in lower case. Speech shows as
+`“sorry”`, and keeps the casing of the transcript. Both lanes move from right
+to left. `tickerText(queue)` merges a lane into the single line
+a Meta glasses layout needs. The glasses cannot animate, so they receive whole
+snapshots.
 
 Everything runs on the device. Audio never leaves the machine. **WebGPU is
 required** (Chrome or Edge on a desktop).

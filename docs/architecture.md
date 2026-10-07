@@ -13,12 +13,15 @@ mic ──► 16 kHz mono, 2 s windows, AudioWorklet (web/src/worklets/pcm-workl
                                                                │
                                         ┌──────────────────────┴──────────────────────┐
                                         ▼                                             ▼
-                              browser: rAF marquee                    glasses: tickerText(queue)
-                              (smooth, 70 px/s)                       (snapshot on change)
+                              browser: two lanes, rAF marquee        glasses: tickerText(queue)
+                              (sound above, speech below,            (snapshot on change)
+                               90 px/s, filtered by kind)
 ```
 
-The two paths never share a model and never block each other. Speech's model
-download happens in the background after the sound path is already live.
+The two paths never share a model and never block each other — including on
+screen: each lane positions its own tokens, so a slow transcript cannot hold up
+a sound. Speech's model download happens in the background after the sound path
+is already live.
 
 ## Sound path — `web/src/lib/sound.ts`
 
@@ -31,6 +34,13 @@ download happens in the background after the sound path is already live.
 3. **Noteworthiness.** A label is queued only if it clears `MIN_SOUND_SCORE`
    (0.2), differs from the last one shown, and respects `SOUND_COOLDOWN_MS`
    (2 s). The same label re-announces after `SOUND_RENOTIFY_MS` (12 s).
+4. **Speech ownership.** AST also labels speech, and it fires first: `[Speech]`
+   lands a second or two before the transcript and says less. Labels in
+   `SPEECH_LABELS` are dropped **while the speech channel is listening** — if
+   Whisper is unavailable, `[Speech]` is the only signal there is, so it stays.
+   Labels Whisper cannot transcribe (`Whispering`, `Chatter`,
+   `Hubbub, speech noise, speech babble`) are never dropped: they carry news
+   the transcript will not carry.
 
 ### Why a trained classifier, not embeddings
 
@@ -67,9 +77,13 @@ bundler-usable location. The ORT version must match the one vad-web resolves.
 
 ## Display — `web/src/components/Ticker.tsx`
 
-One line, constant speed, tokens entering right and exiting left.
-`TickerItem[]` is the source of truth; `tickerText(items, max)` renders the same
-queue as a single line.
+Two lanes, constant speed, tokens entering right and exiting left. The upper
+lane takes `kind: "sound"`, the lower takes `kind: "speech"`, and each lane runs
+its own rAF loop and its own token positions. Sound labels are lower-cased on
+the way into the queue (model output `Clapping` prints as `[clapping]`);
+transcripts keep their own casing because they are quotes. `TickerItem[]` is the
+source of truth; `tickerText(items, max)` renders a lane, or both merged, as a
+single line.
 
 Two details worth preserving:
 
