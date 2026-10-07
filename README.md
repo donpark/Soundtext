@@ -1,36 +1,47 @@
 # SoundText
 
-Ambient-awareness PoC: a device listens to its surroundings and shows a
-continuous, glanceable stream of what it hears — sound events and nearby speech
-— as a single line.
+![The SoundText demo page. The wordmark, a live line that reads [Clapping], and the two channel keys for sound and speech.](docs/cover.png)
 
-Motivating use case: someone wearing earphones (optionally with Meta Ray-Ban
-Display glasses) who cannot hear their surroundings, but wants to know when
-someone speaks to them, what was said, and which sounds matter for safety.
+SoundText is an ambient-awareness proof of concept. A device listens to its
+surroundings. It shows what it hears on one line: sound events and nearby
+speech.
+
+Motivating use case: a person wears earphones, and optionally Meta Ray-Ban
+Display glasses. The person cannot hear the surroundings, but wants to know
+when someone speaks to them, what that person said, and which sounds matter for
+safety.
+
+Live demo: <https://donpark.github.io/Soundtext/>. Use Chrome or Edge on a
+desktop.
 
 ```
 soundtext/
   docs/     design notes (see docs/architecture.md)
   web/      the PoC webapp — Vite + React + TypeScript + Tailwind
-  ios/      not yet; planned MVP
+  ios/      not built yet, planned MVP
 ```
 
 ## What it does
 
-Two independent in-browser pipelines feed one ticker. They are separate on
-purpose: speech recognition must never delay sound detection.
+Two independent pipelines in the browser feed one ticker. The ticker is a
+single line of text. The pipelines stay separate on purpose. Speech recognition
+must never delay sound detection.
 
 | Pipeline | Model | Runtime |
 |---|---|---|
-| **Sound events** | AST — AudioSet classifier, 527 classes | transformers.js / ONNX on WebGPU |
+| **Sound events** | AST, an AudioSet classifier with 527 classes | transformers.js / ONNX on WebGPU |
 | **Speech** | Whisper-base, gated by Silero VAD | transformers.js + `@ricky0123/vad-web` |
 
-A sound renders as `[clap]`, speech as `“sorry”`, and the line marches
-right→left. `tickerText(queue)` is the single-line form intended for a Meta
-glasses layout (the glasses cannot animate, so they get whole snapshots).
+A sound event shows as `[clap]`. Speech shows as `“sorry”`. The ticker moves
+from right to left. `tickerText(queue)` is the single-line form for a Meta
+glasses layout. The glasses cannot animate, so they receive whole snapshots.
 
-Everything runs on-device; audio never leaves the machine. **WebGPU is
-required** (Chrome/Edge desktop).
+Everything runs on the device. Audio never leaves the machine. **WebGPU is
+required** (Chrome or Edge on a desktop).
+
+The first run downloads about 350 MB of models. The download contains the
+sound classifier (174 MB), the speech model (146 MB), and the speech runtime
+(28 MB). The browser caches all of it, so later runs start immediately.
 
 ## Quick start
 
@@ -39,33 +50,41 @@ pnpm install
 pnpm web dev        # http://localhost:5173
 ```
 
-From the repo root, `pnpm web <script>` forwards to the `web` package:
+From the repo root, `pnpm web <script>` runs the script in the `web` package:
 
 ```bash
-pnpm web build          # typecheck + production build
+pnpm web build          # typecheck and production build
 pnpm web test           # unit checks (RMS, WAV)
-pnpm web smoke          # headless end-to-end: dev server + Chrome + a real clap as the mic
+pnpm web smoke          # headless end-to-end: dev server, Chrome, and a real clap as the microphone
 pnpm web sound-check    # headless: label accuracy against known ESC-50 clips
 pnpm web speech-check   # headless: Whisper transcribes a known clip
 pnpm web speech-e2e     # headless: VAD → Whisper → ticker
 ```
 
-The headless checks drive real Chrome at `http://localhost` — a secure origin,
-which is what makes `navigator.gpu` available.
+The headless checks drive real Chrome at `http://localhost`. That address is a
+secure origin. `navigator.gpu` is available only on a secure origin.
+
+A push to `main` deploys the webapp to GitHub Pages.
 
 ## Docs
 
 - [`docs/architecture.md`](docs/architecture.md) — how the pipelines, gates, ticker and caching fit together
 - [`web/README.md`](web/README.md) — the webapp in detail
 - [`docs/embedding-to-label.md`](docs/embedding-to-label.md) — the original
-  zero-shot EmbeddingGemma approach; superseded for sound events, kept for reference
+  zero-shot EmbeddingGemma approach. AST replaces it for sound events, but the
+  document stays for reference.
 - [`docs/ios-meta-glass.md`](docs/ios-meta-glass.md) — Meta Ray-Ban Display output
 
 ## Status
 
-PoC. The webapp listens, classifies sound events, transcribes speech, and
-streams both to the ticker; all of it is covered by headless checks.
+Proof of concept. The webapp listens, classifies sound events, transcribes
+speech, and streams both to the ticker. Headless checks cover all of it.
 
-Not built yet: the iOS/UIKit MVP, the Meta glasses output, speaker
-diarization ("who spoke"), and any notion of speech being *directed at* the
-wearer. See `docs/architecture.md` for the reasoning behind the current design.
+Not built yet:
+
+- the iOS/UIKit MVP
+- the Meta glasses output
+- speaker diarization (which speaker said what)
+- any idea of speech that is directed at the wearer
+
+See `docs/architecture.md` for the reasoning behind the current design.

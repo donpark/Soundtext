@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Headless end-to-end smoke test. Boots the Vite dev server, loads the app in
 // Chrome with a fake microphone, and asserts that WebGPU is available, the
-// LiteRT-LM model loads, and the classifier produces a label.
+// AST sound classifier loads, and it produces a label.
 //
 //   pnpm web smoke
 //
@@ -9,8 +9,8 @@
 //
 // The page must be on a secure origin — http://localhost counts, about:blank
 // does not, and on an insecure origin navigator.gpu is undefined.
-// First run downloads the ~485 MB model + ~108 MB LiteRT WASM; later runs are
-// cached (including the per-label embeddings).
+// First run downloads the models (~350 MB); later runs load them from the
+// persistent browser profile.
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,8 +74,8 @@ async function run() {
   const browser = await puppeteer.launch({
     executablePath: chrome,
     headless: true,
-    // Persistent profile so the ~485 MB model and the label-embedding cache
-    // survive between runs instead of re-downloading every time.
+    // Persistent profile so the model cache survives between runs instead of
+    // re-downloading every time.
     userDataDir: new URL("../.smoke-profile", import.meta.url).pathname,
     protocolTimeout: TIMEOUT_MS,
     args: [
